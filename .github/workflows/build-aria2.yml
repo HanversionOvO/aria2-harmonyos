@@ -84,7 +84,9 @@ jobs:
       - name: Build OpenSSL (arm64-v8a)
         shell: bash
         run: |
-          export USE_CCACHE=1
+          # OpenSSL 构建系统不兼容 ccache 前缀方式 (ccache -I 会被误解析)
+          # 通过 PATH 使用 ccache symlinks 替代
+          export PATH="/usr/lib/ccache/bin:/usr/local/lib/ccache/bin:$PATH"
           export OHOS_ARCH=aarch64
           make -C build-hnp/openssl
 
