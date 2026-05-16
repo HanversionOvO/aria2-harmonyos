@@ -51,7 +51,7 @@ jobs:
         run: |
           sudo apt install -y build-essential cmake curl wget unzip zip \
                               git autoconf libtool pkg-config \
-                              libssl-dev libexpat1-dev libc-ares-dev \
+                              libexpat1-dev libc-ares-dev \
                               libncurses-dev python3 gettext
 
       - name: Setup ccache
@@ -81,6 +81,20 @@ jobs:
             done
           popd
 
+      - name: Cache OpenSSL Source
+        id: cache-openssl
+        uses: actions/cache@v4
+        with:
+          path: build-hnp/openssl/download
+          key: ${{ runner.os }}-openssl-source-3.5.0
+
+      - name: Build OpenSSL (${{ matrix.ohos_abi }})
+        shell: bash
+        run: |
+          export USE_CCACHE=1
+          export OHOS_ARCH=${{ matrix.ohos_arch }}
+          make -C build-hnp/openssl
+
       - name: Cache aria2 Source
         id: cache-source
         uses: actions/cache@v4
@@ -99,25 +113,49 @@ jobs:
       - name: Package HNP (${{ matrix.ohos_abi }})
         shell: bash
         run: |
-          # HNP 格式: zip 包，包含 bin/aria2c
           HNP_NAME="aria2-${{ matrix.ohos_abi }}.hnp"
-          if [ -f "build-hnp/aria2/sysroot/bin/aria2c" ]; then
-            echo "Found aria2c binary:"
-            file build-hnp/aria2/sysroot/bin/aria2c
+
+          # 二进制位于 build-hnp/sysroot/bin/aria2c（Makefrag 的 cp -rfv 步骤）
+          ARIA2C_BIN="build-hnp/sysroot/bin/aria2c"
+
+          if [ ! -f "${ARIA2C_BIN}" ]; then
+            # 备选路径: build 目录下的安装目标
+            ARIA2C_BIN="build-hnp/aria2/build/data/app/base.org/base_1.0/bin/aria2c"
           fi
-          # 创建 HNP zip（sysroot 内容映射到 HNP 根目录）
-          cd build-hnp/aria2/build/data/app/base.org/base_1.0
-          zip -r "${{ github.workspace }}/${HNP_NAME}" .
+
+          if [ ! -f "${ARIA2C_BIN}" ]; then
+            # 最后的备选: find 搜索
+            ARIA2C_BIN=$(find build-hnp -name aria2c -type f | head -1)
+          fi
+
+          if [ -z "${ARIA2C_BIN}" ] || [ ! -f "${ARIA2C_BIN}" ]; then
+            echo "ERROR: aria2c binary not found!"
+            find build-hnp -type f | head -50
+            exit 1
+          fi
+
+          echo "Found aria2c binary: ${ARIA2C_BIN}"
+          file "${ARIA2C_BIN}"
+
+          # HNP 格式: zip 包，bin/aria2c 在根目录
+          HNP_DIR=$(dirname "${ARIA2C_BIN}")
+          cd "${HNP_DIR}"
+          zip -r "${{ github.workspace }}/${HNP_NAME}" bin/aria2c
           cd "${{ github.workspace }}"
+
+          echo "HNP_NAME=${HNP_NAME}" >> "$GITHUB_ENV"
           echo "HNP_SIZE=$(stat -c%s ${HNP_NAME})" >> "$GITHUB_ENV"
+          echo "=== HNP Contents ==="
+          unzip -l "${HNP_NAME}"
 
       - name: Verify Binary (${{ matrix.ohos_abi }})
         shell: bash
         run: |
           echo "=== Binary Info ==="
-          file build-hnp/aria2/sysroot/bin/aria2c 2>/dev/null || echo "binary not in sysroot"
+          file build-hnp/sysroot/bin/aria2c 2>/dev/null || echo "checking alternate path..."
+          file build-hnp/aria2/build/data/app/base.org/base_1.0/bin/aria2c 2>/dev/null || true
           echo "=== Version Check ==="
-          strings build-hnp/aria2/sysroot/bin/aria2c 2>/dev/null | grep -i "aria2" | head -5 || echo "version check skipped"
+          find build-hnp -name aria2c -type f -exec strings {} \; 2>/dev/null | grep -E "aria2|1\.37" | head -5 || echo "version check skipped"
 
       - name: Upload HNP Artifact (${{ matrix.ohos_abi }})
         uses: actions/upload-artifact@v4
