@@ -109,38 +109,24 @@ jobs:
         shell: bash
         run: |
           HNP_NAME="aria2-arm64-v8a.hnp"
+          BIN="build-hnp/sysroot/bin/aria2c"
 
-          # 二进制位于 build-hnp/sysroot/bin/aria2c（Makefrag 的 cp -rfv 步骤）
-          ARIA2C_BIN="build-hnp/sysroot/bin/aria2c"
-
-          if [ ! -f "${ARIA2C_BIN}" ]; then
-            # 备选路径: build 目录下的安装目标
-            ARIA2C_BIN="build-hnp/aria2/build/data/app/base.org/base_1.0/bin/aria2c"
-          fi
-
-          if [ ! -f "${ARIA2C_BIN}" ]; then
-            # 最后的备选: find 搜索
-            ARIA2C_BIN=$(find build-hnp -name aria2c -type f | head -1)
-          fi
-
-          if [ -z "${ARIA2C_BIN}" ] || [ ! -f "${ARIA2C_BIN}" ]; then
-            echo "ERROR: aria2c binary not found!"
-            find build-hnp -type f | head -50
+          if [ ! -f "${BIN}" ]; then
+            echo "ERROR: aria2c not found at ${BIN}!"
             exit 1
           fi
 
-          echo "Found aria2c binary: ${ARIA2C_BIN}"
-          file "${ARIA2C_BIN}"
+          echo "Found: ${BIN}"
+          file "${BIN}"
 
-          # HNP 格式: zip 包，bin/aria2c 在根目录
-          HNP_DIR=$(dirname "${ARIA2C_BIN}")
-          cd "${HNP_DIR}"
+          # HNP = zip，根目录包含 bin/aria2c
+          cd build-hnp/sysroot
           zip -r "${{ github.workspace }}/${HNP_NAME}" bin/aria2c
           cd "${{ github.workspace }}"
 
           echo "HNP_NAME=${HNP_NAME}" >> "$GITHUB_ENV"
           echo "HNP_SIZE=$(stat -c%s ${HNP_NAME})" >> "$GITHUB_ENV"
-          echo "=== HNP Contents ==="
+          echo "=== HNP contents ==="
           unzip -l "${HNP_NAME}"
 
       - name: Verify Binary (arm64-v8a)
