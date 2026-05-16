@@ -20,13 +20,6 @@ env:
 jobs:
   build-aria2:
     runs-on: ubuntu-24.04
-    strategy:
-      matrix:
-        include:
-          - ohos_arch: aarch64
-            ohos_abi: arm64-v8a
-          - ohos_arch: x86_64
-            ohos_abi: x86_64
 
     steps:
       - name: Update Apt Cache
@@ -88,11 +81,11 @@ jobs:
           path: build-hnp/openssl/download
           key: ${{ runner.os }}-openssl-source-3.5.0
 
-      - name: Build OpenSSL (${{ matrix.ohos_abi }})
+      - name: Build OpenSSL (arm64-v8a)
         shell: bash
         run: |
           export USE_CCACHE=1
-          export OHOS_ARCH=${{ matrix.ohos_arch }}
+          export OHOS_ARCH=aarch64
           make -C build-hnp/openssl
 
       - name: Cache aria2 Source
@@ -102,18 +95,18 @@ jobs:
           path: build-hnp/aria2/download
           key: ${{ runner.os }}-aria2-source-1.37.0
 
-      - name: Build aria2c (${{ matrix.ohos_abi }})
+      - name: Build aria2c (arm64-v8a)
         shell: bash
         run: |
           export USE_CCACHE=1
-          export OHOS_ARCH=${{ matrix.ohos_arch }}
-          export OHOS_ABI=${{ matrix.ohos_abi }}
+          export OHOS_ARCH=aarch64
+          export OHOS_ABI=arm64-v8a
           make -C build-hnp/aria2
 
-      - name: Package HNP (${{ matrix.ohos_abi }})
+      - name: Package HNP (arm64-v8a)
         shell: bash
         run: |
-          HNP_NAME="aria2-${{ matrix.ohos_abi }}.hnp"
+          HNP_NAME="aria2-arm64-v8a.hnp"
 
           # 二进制位于 build-hnp/sysroot/bin/aria2c（Makefrag 的 cp -rfv 步骤）
           ARIA2C_BIN="build-hnp/sysroot/bin/aria2c"
@@ -148,7 +141,7 @@ jobs:
           echo "=== HNP Contents ==="
           unzip -l "${HNP_NAME}"
 
-      - name: Verify Binary (${{ matrix.ohos_abi }})
+      - name: Verify Binary (arm64-v8a)
         shell: bash
         run: |
           echo "=== Binary Info ==="
@@ -157,32 +150,10 @@ jobs:
           echo "=== Version Check ==="
           find build-hnp -name aria2c -type f -exec strings {} \; 2>/dev/null | grep -E "aria2|1\.37" | head -5 || echo "version check skipped"
 
-      - name: Upload HNP Artifact (${{ matrix.ohos_abi }})
+      - name: Upload HNP Artifact (arm64-v8a)
         uses: actions/upload-artifact@v4
         with:
-          name: aria2c-${{ matrix.ohos_abi }}
-          path: aria2-${{ matrix.ohos_abi }}.hnp
+          name: aria2c-arm64-v8a
+          path: aria2-arm64-v8a.hnp
           retention-days: 30
 
-  # 合并两个架构的产物为一个 release artifact
-  release:
-    needs: build-aria2
-    runs-on: ubuntu-24.04
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-    steps:
-      - name: Download All Artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: aria2c-*
-          merge-multiple: true
-          path: artifacts/
-
-      - name: List Artifacts
-        run: ls -lh artifacts/
-
-      - name: Upload Combined Release
-        uses: actions/upload-artifact@v4
-        with:
-          name: aria2c-hnp-all
-          path: artifacts/
-          retention-days: 90
