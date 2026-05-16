@@ -1,0 +1,150 @@
+name: Build aria2c HNP
+
+on:
+  push:
+    paths:
+      - 'build-hnp/**'
+      - '.github/workflows/build-aria2.yml'
+  pull_request:
+    paths:
+      - 'build-hnp/**'
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * *"  # 每日 3:00 UTC 自动构建
+
+env:
+  OHOS_SDK_RELEASE_VERSION: "6.0.0.1"
+  OHOS_SDK_VERSION: "6.0.0.48"
+  OHOS_SDK_HOME: ${{ github.workspace }}/ohos-sdk/linux
+
+jobs:
+  build-aria2:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        include:
+          - ohos_arch: aarch64
+            ohos_abi: arm64-v8a
+          - ohos_arch: x86_64
+            ohos_abi: x86_64
+
+    steps:
+      - name: Update Apt Cache
+        run: sudo apt update
+
+      - name: Free Disk Space
+        uses: endersonmenezes/free-disk-space@v3
+        with:
+          remove_android: true
+          remove_dotnet: true
+          remove_haskell: true
+          remove_tool_cache: true
+          remove_swap: true
+          remove_packages: "azure-cli google-cloud-cli microsoft-edge-stable google-chrome-stable firefox postgresql* temurin-* *llvm* mysql* dotnet-sdk-*"
+          remove_packages_one_command: true
+          remove_folders: "/usr/share/swift /usr/share/miniconda /usr/share/az* /usr/local/lib/node_modules /usr/local/share/chromium /usr/local/share/powershell /usr/local/julia /usr/local/aws-cli /usr/local/aws-sam-cli /usr/share/gradle"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt install -y build-essential cmake curl wget unzip zip \
+                              git autoconf libtool pkg-config \
+                              libssl-dev libexpat1-dev libc-ares-dev \
+                              libncurses-dev python3 gettext
+
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          max-size: 1G
+
+      - name: Cache OHOS SDK
+        id: cache-sdk
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.OHOS_SDK_HOME }}
+          key: ${{ runner.os }}-ohos-sdk-${{ env.OHOS_SDK_RELEASE_VERSION }}
+
+      - name: Download OHOS SDK
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          curl -L -o ohos-sdk.tar.gz \
+            "https://repo.huaweicloud.com/openharmony/os/${OHOS_SDK_RELEASE_VERSION}-Release/ohos-sdk-windows_linux-public.tar.gz"
+          tar -xzf ohos-sdk.tar.gz
+          rm ohos-sdk.tar.gz
+          rm -rf ohos-sdk/{ohos,windows}
+          pushd ohos-sdk/linux
+            for file in $(find . -type f -name '*.zip'); do
+              unzip -o "$file" && rm "$file"
+            done
+          popd
+
+      - name: Cache aria2 Source
+        id: cache-source
+        uses: actions/cache@v4
+        with:
+          path: build-hnp/aria2/download
+          key: ${{ runner.os }}-aria2-source-1.37.0
+
+      - name: Build aria2c (${{ matrix.ohos_abi }})
+        shell: bash
+        run: |
+          export USE_CCACHE=1
+          export OHOS_ARCH=${{ matrix.ohos_arch }}
+          export OHOS_ABI=${{ matrix.ohos_abi }}
+          make -C build-hnp/aria2
+
+      - name: Package HNP (${{ matrix.ohos_abi }})
+        shell: bash
+        run: |
+          # HNP 格式: zip 包，包含 bin/aria2c
+          HNP_NAME="aria2-${{ matrix.ohos_abi }}.hnp"
+          if [ -f "build-hnp/aria2/sysroot/bin/aria2c" ]; then
+            echo "Found aria2c binary:"
+            file build-hnp/aria2/sysroot/bin/aria2c
+          fi
+          # 创建 HNP zip（sysroot 内容映射到 HNP 根目录）
+          cd build-hnp/aria2/build/data/app/base.org/base_1.0
+          zip -r "${{ github.workspace }}/${HNP_NAME}" .
+          cd "${{ github.workspace }}"
+          echo "HNP_SIZE=$(stat -c%s ${HNP_NAME})" >> "$GITHUB_ENV"
+
+      - name: Verify Binary (${{ matrix.ohos_abi }})
+        shell: bash
+        run: |
+          echo "=== Binary Info ==="
+          file build-hnp/aria2/sysroot/bin/aria2c 2>/dev/null || echo "binary not in sysroot"
+          echo "=== Version Check ==="
+          strings build-hnp/aria2/sysroot/bin/aria2c 2>/dev/null | grep -i "aria2" | head -5 || echo "version check skipped"
+
+      - name: Upload HNP Artifact (${{ matrix.ohos_abi }})
+        uses: actions/upload-artifact@v4
+        with:
+          name: aria2c-${{ matrix.ohos_abi }}
+          path: aria2-${{ matrix.ohos_abi }}.hnp
+          retention-days: 30
+
+  # 合并两个架构的产物为一个 release artifact
+  release:
+    needs: build-aria2
+    runs-on: ubuntu-24.04
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    steps:
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: aria2c-*
+          merge-multiple: true
+          path: artifacts/
+
+      - name: List Artifacts
+        run: ls -lh artifacts/
+
+      - name: Upload Combined Release
+        uses: actions/upload-artifact@v4
+        with:
+          name: aria2c-hnp-all
+          path: artifacts/
+          retention-days: 90

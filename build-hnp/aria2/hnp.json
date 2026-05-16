@@ -1,0 +1,8 @@
+{
+    "type": "hnp-config",
+    "name": "aria2",
+    "version": "1.37.0",
+    "install": {
+        "bin/aria2c": "bin/aria2c"
+    }
+}
